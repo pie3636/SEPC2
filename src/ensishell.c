@@ -117,7 +117,7 @@ int main() {
 
 		if (l->in) printf("in: %s\n", l->in);
 		if (l->out) printf("out: %s\n", l->out);
-		/: if (l->bg) printf("background (&)\n");
+		/: if (l->bg) printf("background (&)\n") /* struct list of background threads - add this thread */ ;
 
 		/* Display each command of the pipe */
 		/*
@@ -150,10 +150,12 @@ int main() {
 		
 		/*if command = jobs
 			int toto;
-			do {
+			do {	// for elements in our stated list only?!
 				toto = waitpid(-1, &status, WNOHANG);
 				if toto != 0
 					update status
+				// if (WIFEXITED(toto) == true) printf("[Done]  ", pid); // What if the exit is an error?
+				// else printf("[Running]  ", pid);
 			} while (toto != 0);*/
 	}	
 
