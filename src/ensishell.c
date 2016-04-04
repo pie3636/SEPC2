@@ -136,13 +136,13 @@ int main() {
         		close(pipe_connection[0]);
 
         		 // Kommando ausführen, Standardausgabe des Kommandos ist mit der Pipe verbunden
-        		execlp("who","who",NULL);
+        		 execvp(inputCommand->seq[0][0], inputCommand->seq[0]);
         		}
 		// dann zweiten Kindprozess erzeugen
 		else if (fork()==0){
         		dup2(pipe_connection[0],0);
         		close(pipe_connection[1]);
-        		execlp("sort","sort",NULL);
+        		 execvp(inputCommand->seq[1][0], inputCommand->seq[1]);
         		}
 		}
 
