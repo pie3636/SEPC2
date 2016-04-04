@@ -119,7 +119,7 @@ int main() {
 //start pipe
 		
 		
-		if ( l->seq[1] != NULL){
+		if ( l->seq[1] != NULL) {
 			
 		// pipe_verbindung[0] zum Lesen und pipe_verbindung[1] zum Schreiben
 		int pipe_connection[2];
@@ -136,87 +136,87 @@ int main() {
         		close(pipe_connection[0]);
 
         		 // Kommando ausführen, Standardausgabe des Kommandos ist mit der Pipe verbunden
-        		 execvp(inputCommand->seq[0][0], inputCommand->seq[0]);
+        		 execvp(l->seq[0][0], l->seq[0]);
         		}
 		// dann zweiten Kindprozess erzeugen
 		else if (fork()==0){
         		dup2(pipe_connection[0],0);
         		close(pipe_connection[1]);
-        		 execvp(inputCommand->seq[1][0], inputCommand->seq[1]);
+        		 execvp(l->seq[1][0], l->seq[1]);
         		}
-		}
+		} else {
 
 			
-//end pipe
 
-		if (l->err) {
-			/* Syntax error, read another command */
-			printf("error: %s\n", l->err);
-			continue;
-		}
+			if (l->err) {
+				/* Syntax error, read another command */
+				printf("error: %s\n", l->err);
+				continue;
+			}
 
-		if (l->in) printf("in: %s\n", l->in);
-		if (l->out) printf("out: %s\n", l->out);
+			if (l->in) printf("in: %s\n", l->in);
+			if (l->out) printf("out: %s\n", l->out);
 		
-		int status;
+			int status;
 		
-		if (l->seq[0] != NULL && !strncmp(l->seq[0][0], "jobs", 4)) {
-			if (jobs == NULL) {
-				printf("No jobs found\n");
-			} else {
-				int count = 1;
-				pid_list* current = jobs, *cur;
-				while (current != NULL) {
-					if (current->isFinished) { // Suppression de la liste
-						if (jobs == current) {
-							cur = jobs->next;
-							free(jobs);
-							jobs = cur;
-						} else {
-							cur = jobs;
-							while (cur->next != current) {
-								cur = cur->next;
+			if (l->seq[0] != NULL && !strncmp(l->seq[0][0], "jobs", 4)) {
+				if (jobs == NULL) {
+					printf("No jobs found\n");
+				} else {
+					int count = 1;
+					pid_list* current = jobs, *cur;
+					while (current != NULL) {
+						if (current->isFinished) { // Suppression de la liste
+							if (jobs == current) {
+								cur = jobs->next;
+								free(jobs);
+								jobs = cur;
+							} else {
+								cur = jobs;
+								while (cur->next != current) {
+									cur = cur->next;
+								}
+								cur->next = cur->next->next;
+								free(current);
 							}
-							cur->next = cur->next->next;
-							free(current);
+						} else {
+							current->isFinished = waitpid(current->pid, &status, WNOHANG);
+							printf("[%d]\t%s\t%d\t%s\n", count, current->isFinished ? "Terminé\t\0" : "En cours\0", current->pid, current->command);
+						}
+						current = current->next;
+						count++;
+					}
+				}
+			} else {
+				pid_t pid = fork();
+				if (pid == -1) {
+					printf("Couldn't fork!\n");
+					exit(0);
+				} else if (pid == 0) { // Fils
+					int ret = execvp(l->seq[0][0], l->seq[0]);
+					if (ret != 0) {
+						printf("An error occurred while executing command\n");
+					}
+					return ret;
+				} else { // Père
+					if (l->bg) {
+						printf("Detaching after fork from child process %d.\n", pid);
+						pid_list* new_job = malloc(sizeof(pid_list));
+						new_job->pid = pid;
+						new_job->command = malloc(sizeof(char) * strlen(l->seq[0][0])); // TODO: Copy entire command?
+						new_job->isFinished = 0;
+						new_job->next = jobs;
+						strncpy(new_job->command, l->seq[0][0], strlen(l->seq[0][0]));
+						jobs = new_job;
+						if (waitpid(pid, &status, WNOHANG)) {
+							jobs = jobs->next;
+							free(new_job);
 						}
 					} else {
-						current->isFinished = waitpid(current->pid, &status, WNOHANG);
-						printf("[%d]\t%s\t%d\t%s\n", count, current->isFinished ? "Terminé\t\0" : "En cours\0", current->pid, current->command);
+						waitpid(pid, &status, 0);
 					}
-					current = current->next;
-					count++;
 				}
-			}
-		} else {
-			pid_t pid = fork();
-			if (pid == -1) {
-				printf("Couldn't fork!\n");
-				exit(0);
-			} else if (pid == 0) { // Fils
-				int ret = execvp(l->seq[0][0], l->seq[0]);
-				if (ret != 0) {
-					printf("An error occurred while executing command\n");
-				}
-				return ret;
-			} else { // Père
-				if (l->bg) {
-					printf("Detaching after fork from child process %d.\n", pid);
-					pid_list* new_job = malloc(sizeof(pid_list));
-					new_job->pid = pid;
-					new_job->command = malloc(sizeof(char) * strlen(l->seq[0][0])); // TODO: Copy entire command?
-					new_job->isFinished = 0;
-					new_job->next = jobs;
-					strncpy(new_job->command, l->seq[0][0], strlen(l->seq[0][0]));
-					jobs = new_job;
-					if (waitpid(pid, &status, WNOHANG)) {
-						jobs = jobs->next;
-						free(new_job);
-					}
-				} else {
-					waitpid(pid, &status, 0);
-				}
-			}
-		}		
+			}	
+		}	
 	}	
 }
