@@ -53,3 +53,4 @@ pointer.
 When the user enters an empty line, seq[0] is NULL.
 */
 #endif
+

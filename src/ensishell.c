@@ -8,6 +8,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include <sys/wait.h>
+
 #include "variante.h"
 #include "readcmd.h"
 
@@ -26,15 +28,15 @@
 
 int executer(char *line)
 {
-	/* Insert your code to execute the command line
-	 * identically to the standard execution scheme:
-	 * parsecmd, then fork+execvp, for a single command.
-	 * pipe and i/o redirection are not required.
-	 */
-	printf("Not implemented: can not execute %s\n", line);
-
-	/* Remove this line when using parsecmd as it will free it */
-	free(line);
+	struct cmdline* inputCommand = parsecmd(&line);
+	pid_t pid = fork();
+	if (pid == -1) {
+		printf("Couldn't fork!\n");
+		exit(0);
+	} else if (pid == 0) { // Fils
+		return execvp(inputCommand->seq[0][0], inputCommand->seq[0]);
+	} else { // Père
+	}
 	
 	return 0;
 }
@@ -70,7 +72,7 @@ int main() {
 	while (1) {
 		struct cmdline *l;
 		char *line=0;
-		int i, j;
+		//int i, j;
 		char *prompt = "ensishell>";
 
 		/* Readline use some internal memory structure that
@@ -102,7 +104,6 @@ int main() {
 
 		/* If input stream closed, normal termination */
 		if (!l) {
-		  
 			terminate(0);
 		}
 		
@@ -116,9 +117,10 @@ int main() {
 
 		if (l->in) printf("in: %s\n", l->in);
 		if (l->out) printf("out: %s\n", l->out);
-		if (l->bg) printf("background (&)\n");
+		/: if (l->bg) printf("background (&)\n");
 
 		/* Display each command of the pipe */
+		/*
 		for (i=0; l->seq[i]!=0; i++) {
 			char **cmd = l->seq[i];
 			printf("seq[%d]: ", i);
@@ -127,6 +129,32 @@ int main() {
                         }
 			printf("\n");
 		}
-	}
+		*/
+		
+		int status;
+		
+		pid_t pid = fork();
+		if (pid == -1) {
+			printf("Couldn't fork!\n");
+			exit(0);
+		} else if (pid == 0) { // Fils
+			int ret = execvp(l->seq[0][0], l->seq[0]);
+			if (ret != 0) {
+				printf("An error occurred while executing command\n");
+			}
+			return ret;
+		} else { // Père
+			/*toto = */waitpid(pid, &status, l->bg ? WNOHANG : 0);
+			//if toto != 0 -> update status
+		}
+		
+		/*if command = jobs
+			int toto;
+			do {
+				toto = waitpid(-1, &status, WNOHANG);
+				if toto != 0
+					update status
+			} while (toto != 0);*/
+	}	
 
 }
