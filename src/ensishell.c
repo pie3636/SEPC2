@@ -108,7 +108,38 @@ int main() {
 		}
 		
 
+//start pipe
 		
+		
+		if ( l->seq[1] != NULL){
+			
+		// pipe_verbindung[0] zum Lesen und pipe_verbindung[1] zum Schreiben
+		int pipe_connection[2];
+
+		//Initialisierung durch die Funktion Pipe
+		pipe(pipe_connection);
+
+		//Kindprozess erzeugen
+		if (fork()==0){
+        		// dup2 verbindet den Filedeskriptor der Pipe mit dem Filedeskriptor der Standardausgabe
+        		dup2(pipe_connection[1],1);
+
+        		// der Leseausgang muss geschlossen werden, da dieser Prozess nichts liest
+        		close(pipe_connection[0]);
+
+        		 // Kommando ausführen, Standardausgabe des Kommandos ist mit der Pipe verbunden
+        		execlp("who","who",NULL);
+        		}
+		// dann zweiten Kindprozess erzeugen
+		else if (fork()==0){
+        		dup2(pipe_connection[0],0);
+        		close(pipe_connection[1]);
+        		execlp("sort","sort",NULL);
+        		}
+		}
+
+			
+//end pipe
 		if (l->err) {
 			/* Syntax error, read another command */
 			printf("error: %s\n", l->err);
