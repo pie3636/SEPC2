@@ -26,6 +26,13 @@
 #if USE_GUILE == 1
 #include <libguile.h>
 
+typedef struct pid_list {
+	int pid;
+	char* command;
+	int isFinished; // 0 if running, 1 if finished, 2 is finished and printed (to be deleted)
+	struct pid_list* next;
+} pid_list;
+
 int executer(char *line)
 {
 	struct cmdline* inputCommand = parsecmd(&line);
@@ -69,6 +76,8 @@ int main() {
         scm_c_define_gsubr("executer", 1, 0, 0, executer_wrapper);
 #endif
 
+		pid_list* jobs = NULL;
+
 	while (1) {
 		struct cmdline *l;
 		char *line=0;
@@ -106,7 +115,6 @@ int main() {
 		if (!l) {
 			terminate(0);
 		}
-		
 
 //start pipe
 		
@@ -140,6 +148,7 @@ int main() {
 
 			
 //end pipe
+
 		if (l->err) {
 			/* Syntax error, read another command */
 			printf("error: %s\n", l->err);
@@ -148,46 +157,66 @@ int main() {
 
 		if (l->in) printf("in: %s\n", l->in);
 		if (l->out) printf("out: %s\n", l->out);
-		/: if (l->bg) printf("background (&)\n") /* struct list of background threads - add this thread */ ;
-
-		/* Display each command of the pipe */
-		/*
-		for (i=0; l->seq[i]!=0; i++) {
-			char **cmd = l->seq[i];
-			printf("seq[%d]: ", i);
-                        for (j=0; cmd[j]!=0; j++) {
-                                printf("'%s' ", cmd[j]);
-                        }
-			printf("\n");
-		}
-		*/
 		
 		int status;
 		
-		pid_t pid = fork();
-		if (pid == -1) {
-			printf("Couldn't fork!\n");
-			exit(0);
-		} else if (pid == 0) { // Fils
-			int ret = execvp(l->seq[0][0], l->seq[0]);
-			if (ret != 0) {
-				printf("An error occurred while executing command\n");
+		if (l->seq[0] != NULL && !strncmp(l->seq[0][0], "jobs", 4)) {
+			if (jobs == NULL) {
+				printf("No jobs found\n");
+			} else {
+				int count = 1;
+				pid_list* current = jobs, *cur;
+				while (current != NULL) {
+					if (current->isFinished) { // Suppression de la liste
+						if (jobs == current) {
+							cur = jobs->next;
+							free(jobs);
+							jobs = cur;
+						} else {
+							cur = jobs;
+							while (cur->next != current) {
+								cur = cur->next;
+							}
+							cur->next = cur->next->next;
+							free(current);
+						}
+					} else {
+						current->isFinished = waitpid(current->pid, &status, WNOHANG);
+						printf("[%d]\t%s\t%d\t%s\n", count, current->isFinished ? "Terminé\t\0" : "En cours\0", current->pid, current->command);
+					}
+					current = current->next;
+					count++;
+				}
 			}
-			return ret;
-		} else { // Père
-			/*toto = */waitpid(pid, &status, l->bg ? WNOHANG : 0);
-			//if toto != 0 -> update status
-		}
-		
-		/*if command = jobs
-			int toto;
-			do {	// for elements in our stated list only?!
-				toto = waitpid(-1, &status, WNOHANG);
-				if toto != 0
-					update status
-				// if (WIFEXITED(toto) == true) printf("[Done]  ", pid); // What if the exit is an error?
-				// else printf("[Running]  ", pid);
-			} while (toto != 0);*/
+		} else {
+			pid_t pid = fork();
+			if (pid == -1) {
+				printf("Couldn't fork!\n");
+				exit(0);
+			} else if (pid == 0) { // Fils
+				int ret = execvp(l->seq[0][0], l->seq[0]);
+				if (ret != 0) {
+					printf("An error occurred while executing command\n");
+				}
+				return ret;
+			} else { // Père
+				if (l->bg) {
+					printf("Detaching after fork from child process %d.\n", pid);
+					pid_list* new_job = malloc(sizeof(pid_list));
+					new_job->pid = pid;
+					new_job->command = malloc(sizeof(char) * strlen(l->seq[0][0])); // TODO: Copy entire command?
+					new_job->isFinished = 0;
+					new_job->next = jobs;
+					strncpy(new_job->command, l->seq[0][0], strlen(l->seq[0][0]));
+					jobs = new_job;
+					if (waitpid(pid, &status, WNOHANG)) {
+						jobs = jobs->next;
+						free(new_job);
+					}
+				} else {
+					waitpid(pid, &status, 0);
+				}
+			}
+		}		
 	}	
-
 }
