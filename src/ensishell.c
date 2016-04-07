@@ -115,10 +115,8 @@ int main() {
 		if (!l) {
 			terminate(0);
 		}
-
-//start pipe
 		
-		
+		// Start type
 		if (l->seq[1] != NULL) {
 			int pfd[2];
 			if (pipe(pfd) == -1) {
