@@ -155,7 +155,7 @@ int readAndRun(struct cmdline* l, int* returnStatus) {
 		    execvp(l->seq[0][0], l->seq[0]);
 		    exit(0);
 		} else {
-			 waitpid(pid, &status, 0);
+			fflush(stdout);
 		}
 		if (!strcmp(l->seq[1][0], "exit")) {
 		    *returnStatus = 1;
@@ -174,7 +174,7 @@ int readAndRun(struct cmdline* l, int* returnStatus) {
 		        }
 		        dup2(outputfile, 1);
 		        close(outputfile);
-		    }  
+		    }
 		    execvp(l->seq[1][0], l->seq[1]);
 		    exit(0);
 		}
