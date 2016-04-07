@@ -9,7 +9,12 @@
 #include <stdlib.h>
 
 #include <sys/wait.h>
+#include <sys/time.h>
+#include <sys/resource.h>
+
 #include <fcntl.h>
+#include <signal.h>
+#include <unistd.h>
 
 #include "variante.h"
 #include "readcmd.h"
@@ -31,12 +36,52 @@ typedef struct pid_list {
     int pid;
     char* command;
     int isFinished; // 0 if running, 1 if finished, 2 is finished and printed (to be deleted)
+    struct timeval start; // Time at which the process was started
     struct pid_list* next;
 } pid_list;
 
 pid_list* jobs = NULL;
 
 int readAndRun(struct cmdline* l, int* status);
+void sig_handler(int signo);
+int executer(char *line);
+SCM executer_wrapper(SCM x);
+void terminate(char *line);
+
+void sig_handler(int signo) {
+	if (signo == SIGCHLD) {
+		struct timeval stop;
+		pid_t pid;
+		int status;
+		long int timeDifference;
+		while ((pid = waitpid(-1, &status, WNOHANG)) > 0) {
+			gettimeofday(&stop, NULL);
+			int count = 1;
+		    pid_list* current = jobs, *cur;
+		    while (current != NULL && current->pid != pid) {
+		    	current = current->next;
+		    	count++;
+	    	}
+	    	if (current != NULL) {
+				timeDifference = stop.tv_sec * 1000000 + stop.tv_usec - current->start.tv_usec - current->start.tv_sec * 1000000; // Time difference in microseconds
+		    	printf("\n[%d]\t%d\t%s\tTerminé - durée %ld.%06ld s\nensishell>", count, pid, current->command, timeDifference / 1000000, timeDifference % 1000000);
+		    	fflush(stdout);
+		        if (jobs == current) {
+		            cur = jobs->next;
+		            free(jobs);
+		            jobs = cur;
+		        } else {
+		            cur = jobs;
+		            while (cur->next != current) {
+		                cur = cur->next;
+		            }
+		            cur->next = cur->next->next;
+		            free(current);
+		        }
+	        }
+		}
+	}
+}
 
 int executer(char *line) {
 	int status;
@@ -64,6 +109,8 @@ void terminate(char *line) {
 
 int main() {
     printf("Variante %d: %s\n", VARIANTE, VARIANTE_STRING);
+    
+    signal(SIGCHLD, sig_handler);
 
 #ifdef USE_GUILE
     scm_init_guile();
@@ -180,7 +227,9 @@ int readAndRun(struct cmdline* l, int* returnStatus) {
 		}
 		close(pfd[0]);
 		close(pfd[1]);
-		waitpid(pid, &status, 0);
+		if (!l->bg) {
+			waitpid(pid, &status, 0);
+		}
 	} else { // Syntax error, read another command
 		if (l->err) {
 		    printf("Error: %s\n", l->err);
@@ -218,8 +267,14 @@ int readAndRun(struct cmdline* l, int* returnStatus) {
 		            printf("No jobs found\n");
 		        }
 		    }
+		} else if (l->seq != NULL && l->seq[0] != NULL && !strncmp(l->seq[0][0], "ulimit", 6)) {
+			struct rlimit limits;
+			limits.rlim_cur = atoi(l->seq[0][1]);
+			limits.rlim_max = limits.rlim_cur + 5;
+			setrlimit(RLIMIT_CPU, &limits);
 		} else if (l->seq != NULL && l->seq[0] != NULL) {
 		    pid_t pid = fork();
+		    struct timeval time;
 		    if (pid < 0) {
 		        printf("Couldn't fork!\n");
 		        return 1;
@@ -238,13 +293,15 @@ int readAndRun(struct cmdline* l, int* returnStatus) {
 				perror("Failed to execute command\n");
 				exit(1);
 		    } else { // Père
+		    	gettimeofday(&time, NULL);
 		        if (l->bg) {
-		            printf("Detaching after fork from child process %d.\n", pid);
+			        printf("Detaching after fork from child process %d.\n", pid);
 		            pid_list* new_job = malloc(sizeof(pid_list));
 		            new_job->pid = pid;
 		            new_job->command = malloc(sizeof(char) * strlen(l->seq[0][0])); // TODO: Copy entire command?
 		            new_job->isFinished = 0;
 		            new_job->next = jobs;
+		            new_job->start = time;
 		            strncpy(new_job->command, l->seq[0][0], strlen(l->seq[0][0]));
 		            jobs = new_job;
 		            if (waitpid(pid, &status, WNOHANG)) {
