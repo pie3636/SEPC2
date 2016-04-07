@@ -9,6 +9,7 @@
 #include <stdlib.h>
 
 #include <sys/wait.h>
+#include <fcntl.h>
 
 #include "variante.h"
 #include "readcmd.h"
@@ -27,259 +28,245 @@
 #include <libguile.h>
 
 typedef struct pid_list {
-	int pid;
-	char* command;
-	int isFinished; // 0 if running, 1 if finished, 2 is finished and printed (to be deleted)
-	struct pid_list* next;
+    int pid;
+    char* command;
+    int isFinished; // 0 if running, 1 if finished, 2 is finished and printed (to be deleted)
+    struct pid_list* next;
 } pid_list;
 
-int executer(char *line)
-{
-	struct cmdline* inputCommand = parsecmd(&line);
-	pid_t pid = fork();
-	if (pid == -1) {
-		printf("Couldn't fork!\n");
-		exit(0);
-	} else if (pid == 0) { // Fils
-		return execvp(inputCommand->seq[0][0], inputCommand->seq[0]);
-	} else { // Père
-	}
-	
-	return 0;
+pid_list* jobs = NULL;
+
+int readAndRun(struct cmdline* l, int* status);
+
+int executer(char *line) {
+	int status;
+    return readAndRun(parsecmd(&line), &status);
 }
 
-SCM executer_wrapper(SCM x)
-{
-        return scm_from_int(executer(scm_to_locale_stringn(x, 0)));
+SCM executer_wrapper(SCM x) {
+    return scm_from_int(executer(scm_to_locale_stringn(x, 0)));
 }
 #endif
 
 
 void terminate(char *line) {
 #ifdef USE_GNU_READLINE
-	/* rl_clear_history() does not exist yet in centOS 6 */
-	clear_history();
+    /* rl_clear_history() does not exist yet in centOS 6 */
+    clear_history();
 #endif
-	if (line) {
-	  	free(line);
-	}
-	printf("exit\n");
-	exit(0);
+    if (line) {
+        free(line);
+    }
+    printf("exit\n");
+    exit(0);
 }
 
 
 int main() {
-        printf("Variante %d: %s\n", VARIANTE, VARIANTE_STRING);
+    printf("Variante %d: %s\n", VARIANTE, VARIANTE_STRING);
 
 #ifdef USE_GUILE
-        scm_init_guile();
-        /* register "executer" function in scheme */
-        scm_c_define_gsubr("executer", 1, 0, 0, executer_wrapper);
+    scm_init_guile();
+    /* register "executer" function in scheme */
+    scm_c_define_gsubr("executer", 1, 0, 0, executer_wrapper);
 #endif
 
-		pid_list* jobs = NULL;
+    int returnStatus, status;
 
-	while (1) {
-		struct cmdline *l;
-		char *line=0;
-		//int i, j;
-		char *prompt = "ensishell>";
+    while (1) {
+        struct cmdline *l;
+        char *line = 0;
+        //int i, j;
+        char *prompt = "ensishell>";
 
-		/* Readline use some internal memory structure that
-		   can not be cleaned at the end of the program. Thus
-		   one memory leak per command seems unavoidable yet */
-		line = readline(prompt);
-		if (line == 0 || ! strncmp(line,"exit", 4)) {
-			terminate(line);
-		}
+        /* Readline use some internal memory structure that
+           can not be cleaned at the end of the program. Thus
+           one memory leak per command seems unavoidable yet */
+        line = readline(prompt);
+        if (line == 0 || ! strncmp(line,"exit", 4)) {
+            terminate(line);
+        }
 
 #ifdef USE_GNU_READLINE
-		add_history(line);
+        add_history(line);
 #endif
 
 
 #ifdef USE_GUILE
-		/* The line is a scheme command */
-		if (line[0] == '(') {
-			char catchligne[strlen(line) + 256];
-			sprintf(catchligne, "(catch #t (lambda () %s) (lambda (key . parameters) (display \"mauvaise expression/bug en scheme\n\")))", line);
-			scm_eval_string(scm_from_locale_string(catchligne));
-			free(line);
-                        continue;
-                }
+        /* The line is a scheme command */
+        if (line[0] == '(') {
+            char catchligne[strlen(line) + 256];
+            sprintf(catchligne, "(catch #t (lambda () %s) (lambda (key . parameters) (display \"mauvaise expression/bug en scheme\n\")))", line);
+            scm_eval_string(scm_from_locale_string(catchligne));
+            free(line);
+            continue;
+        }
 #endif
 
-		/* parsecmd free line and set it up to 0 */
-		l = parsecmd( & line);
+        /* parsecmd free line and set it up to 0 */
+        l = parsecmd(& line);
 
-		/* If input stream closed, normal termination */
-		if (!l) {
-			terminate(0);
+        /* If input stream closed, normal termination */
+        if (!l) {
+            terminate(0);
+        }
+        
+        returnStatus = readAndRun(l, &status);
+        if (returnStatus) {
+        	exit(returnStatus);
+        }
+        if (status) {
+        	exit(0);
+        }
+    }	
+}
+
+int readAndRun(struct cmdline* l, int* returnStatus) {
+	int status;
+	*returnStatus = 0;
+
+	// Start pipe
+	if (l->seq != NULL && l->seq[0] != NULL && l->seq[1] != NULL) {
+		int pfd[2], pid;
+		if (pipe(pfd) == -1 || (pid = fork()) < 0) {
+		    perror("Pipe or fork failed\n");
+		    return 1;
 		}
-		
-		// Start pipe
-		
+		if (!strcmp(l->seq[0][0], "exit")) {
+			*returnStatus = 1;
+		    return 0;
+		}
+		if (pid == 0) {
+		    if(l->in != NULL) {          
+		        int inputfile=open(l->in,O_RDONLY);
+		        if(inputfile == -1) {
+		            printf("Error while opening input file\n");
+		            return 0;
+		        }
+		        dup2(inputfile, 0);
+		        close(inputfile);
+		    } 
+		    dup2(pfd[1], 1);
+		    close(pfd[1]);
+		    close(pfd[0]);
+		    execvp(l->seq[0][0], l->seq[0]);
+		    perror("Error while executing command");
+		    return 1; 
+		}
+		if (!strcmp(l->seq[1][0], "exit")) {
+		    *returnStatus = 1;
+		    return 0;
+		}
+		pid = fork();
+		if (pid == 0) {
+		    dup2(pfd[0],0);
+		    close(pfd[1]);
+		    close(pfd[0]);
+		    if(l->out != NULL) {
+		        int outputfile = open(l->out, O_CREAT | O_RDWR | O_TRUNC, S_IRUSR | S_IWUSR | S_IXUSR | S_IRGRP | S_IWGRP | S_IXGRP | S_IROTH | S_IWOTH | S_IXOTH);
+		        if (outputfile == -1) {
+		            printf("Error while opening output file\n");
+		            return 0;
+		        }
+		        dup2(outputfile, 1);
+		        close(outputfile);
+		    }  
+		    execvp(l->seq[1][0], l->seq[1]);
+		    perror("exec");
+		    return 1;
+		}
+		close(pfd[0]);
+		close(pfd[1]);
 		/*
-				   //On relie les commandes//
-				   //Cas: Premiere sequence de commandes//
-				   if(i==0) {
+		   if (pid == 0) { // Child
+		   close(pfd[1]);
+		   dup2(pfd[0], 0); // Connect the read side with stdin
+		   close(pfd[0]);
+		   execvp(l->seq[1][0], l->seq[1]);
+		   perror("Command failed"); // Execlp shouldn't return
+		   } else { // Parent
+		   close(pfd[0]);
+		   dup2(pfd[1], 1); // Connect the write side with stdout
+		   close(pfd[1]);
+		   if ((pid = fork()) < 0) {
+		   printf("Fork failed\n");
+		   } else {
+		   if (pid == 0) {
+		   execvp(l->seq[0][0], l->seq[0]);
+		   perror("Command failed"); // Execlp shouldn't return
+		   }
+		   }
+		   }
+		   */
+	} else {
+		if (l->err) {
+		    /* Syntax error, read another command */
+		    printf("Error: %s\n", l->err);
+		    return 0;
+		}
 
-					// Redirection du fichier in sur l'entrée de la premiere commande
-					if(l->in!=NULL) {          
-					     int STDIN=open(l->in,O_RDONLY);
-					     if(STDIN==-1) {
-					     	printf("Erreur dans l'ouverture du fichier IN\n");
-					     	exit(0); //On ouvre le descripteur de fichier mode lecture
-					     }
-					     
-					     dup2(STDIN,0); // On le duplique dans le descripteur stdin//
-					     if(close(STDIN)==-1){
-						  printf("Erreur dans la fermeture du fichier\n");
-					     }
-					} 
-					 //on relie les sequences de commandes entre elles, en l'occurence ici, on dirige la sortie de la commande vers l'entrée du tuyau//			
-				     dup2(Tuyau[1],1); // on relie la sortie du processus au pipe coté ecriture//
-				     close(Tuyau[1]); //Cloture l'ecriture du pipe //
-				     close(Tuyau[0]); //Cloture la lecture du pipe//
-				   }	
-				   
-				   //Cas: Deuxieme sequence de commandes//
-				   else if( i==1) {
-					//On relie la sortie du tuyau a l'entrée de la sequence de commandes
-					dup2(Tuyau[0],0); // on relie l'entree du processus au pipe coté lecture//
-					close(Tuyau[1]); //on cloture l'ecriture du pipe//
-					close(Tuyau[0]); //on cloture la lecture du pipe //	
-				   
-
-					//On gere la redirection de sortie si elle existe//
-					if(l->out!=NULL) {
-					     int STDOUT;
-					     if ((STDOUT=open(l->out, O_RDWR | O_CREAT | O_TRUNC, S_IRWXU | S_IRWXG | S_IRWXO))==-1) {
-					     	printf("Erreur dans l'ouverture du fichier OUT");
-					        exit(0);
-					     }
-					     	
-					    //On ouvre le descripteur de fichier mode ecriture, creation et concatenation//
-					     dup2(STDOUT,1);
-					     if(close(STDOUT)==-1){
-						  printf("Erreur dans la fermeture du fichier\n");
-					     }
-
-				         }  
-				   }
-			 	   	      
-			      //On execute la commande
-			       execvp(cmd[0],cmd);
-			       perror("exec");
-			       exit(1);    
-	close(Tuyau[0]);
-	close(Tuyau[1]);
-		
-		*/
-		if (l->seq[1] != NULL) {
-			int pfd[2];
-			if (pipe(pfd) == -1) {
-				perror("Pipe failed\n");
-			} else {
-				int pid;
-			   	if ((pid = fork()) < 0) {
-					printf("Fork failed\n");
-				} else {
-			 		if (pid == 0) { // Child
-						close(pfd[1]);
-						dup2(pfd[0], 0); // Connect the read side with stdin
-						close(pfd[0]);
-						execvp(l->seq[1][0], l->seq[1]);
-						perror("Command failed"); // Execlp shouldn't return
-					} else { // Parent
-						close(pfd[0]);
-						dup2(pfd[1], 1); // Connect the write side with stdout
-						close(pfd[1]);
-						if ((pid = fork()) < 0) {
-							printf("Fork failed\n");
-						} else {
-							if (pid == 0) {
-								execvp(l->seq[0][0], l->seq[0]);
-								perror("Command failed"); // Execlp shouldn't return
-							}
-						}
-					}
-				}
-			}
+		if (l->seq[0] != NULL && !strncmp(l->seq[0][0], "jobs", 4)) {
+		    if (jobs == NULL) {
+		        printf("No jobs found\n");
+		    } else {
+		        int count = 1, jobs_count = 0;
+		        pid_list* current = jobs, *cur;
+		        while (current != NULL) {
+		            if (current->isFinished) { // Suppression de la liste
+		                if (jobs == current) {
+		                    cur = jobs->next;
+		                    free(jobs);
+		                    jobs = cur;
+		                } else {
+		                    cur = jobs;
+		                    while (cur->next != current) {
+		                        cur = cur->next;
+		                    }
+		                    cur->next = cur->next->next;
+		                    free(current);
+		                }
+		            } else {
+		                current->isFinished = waitpid(current->pid, &status, WNOHANG);
+		                jobs_count++;
+		                printf("[%d]\t%s\t%d\t%s\n", count, current->isFinished ? "Terminé\t\0" : "En cours\0", current->pid, current->command);
+		            }
+		            current = current->next;
+		            count++;
+		        }
+		        if (jobs_count == 0) {
+		            printf("No jobs found\n");
+		        }
+		    }
 		} else {
-			if (l->err) {
-				/* Syntax error, read another command */
-				printf("Error: %s\n", l->err);
-				continue;
-			}
-
-			if (l->in) printf("in: %s\n", l->in);
-			if (l->out) printf("out: %s\n", l->out);
-		
-			int status;
-		
-			if (l->seq[0] != NULL && !strncmp(l->seq[0][0], "jobs", 4)) {
-				if (jobs == NULL) {
-					printf("No jobs found\n");
-				} else {
-					int count = 1, jobs_count = 0;
-					pid_list* current = jobs, *cur;
-					while (current != NULL) {
-						if (current->isFinished) { // Suppression de la liste
-							if (jobs == current) {
-								cur = jobs->next;
-								free(jobs);
-								jobs = cur;
-							} else {
-								cur = jobs;
-								while (cur->next != current) {
-									cur = cur->next;
-								}
-								cur->next = cur->next->next;
-								free(current);
-							}
-						} else {
-							current->isFinished = waitpid(current->pid, &status, WNOHANG);
-							jobs_count++;
-							printf("[%d]\t%s\t%d\t%s\n", count, current->isFinished ? "Terminé\t\0" : "En cours\0", current->pid, current->command);
-						}
-						current = current->next;
-						count++;
-					}
-					if (jobs_count == 0) {
-						printf("No jobs found\n");
-					}
-				}
-			} else {
-				pid_t pid = fork();
-				if (pid == -1) {
-					printf("Couldn't fork!\n");
-					exit(0);
-				} else if (pid == 0) { // Fils
-					int ret = execvp(l->seq[0][0], l->seq[0]);
-					if (ret != 0) {
-						printf("An error occurred while executing command\n");
-					}
-					return ret;
-				} else { // Père
-					if (l->bg) {
-						printf("Detaching after fork from child process %d.\n", pid);
-						pid_list* new_job = malloc(sizeof(pid_list));
-						new_job->pid = pid;
-						new_job->command = malloc(sizeof(char) * strlen(l->seq[0][0])); // TODO: Copy entire command?
-						new_job->isFinished = 0;
-						new_job->next = jobs;
-						strncpy(new_job->command, l->seq[0][0], strlen(l->seq[0][0]));
-						jobs = new_job;
-						if (waitpid(pid, &status, WNOHANG)) {
-							jobs = jobs->next;
-							free(new_job);
-						}
-					} else {
-						waitpid(pid, &status, 0);
-					}
-				}
-			}	
+		    pid_t pid = fork();
+		    if (pid == -1) {
+		        printf("Couldn't fork!\n");
+		        return 1;
+		    } else if (pid == 0) { // Fils
+		        int ret = execvp(l->seq[0][0], l->seq[0]);
+		        if (ret != 0) {
+		            printf("An error occurred while executing command\n");
+		            return 1;
+		        }
+		    } else { // Père
+		        if (l->bg) {
+		            printf("Detaching after fork from child process %d.\n", pid);
+		            pid_list* new_job = malloc(sizeof(pid_list));
+		            new_job->pid = pid;
+		            new_job->command = malloc(sizeof(char) * strlen(l->seq[0][0])); // TODO: Copy entire command?
+		            new_job->isFinished = 0;
+		            new_job->next = jobs;
+		            strncpy(new_job->command, l->seq[0][0], strlen(l->seq[0][0]));
+		            jobs = new_job;
+		            if (waitpid(pid, &status, WNOHANG)) {
+		                jobs = jobs->next;
+		                free(new_job);
+		            }
+		        } else {
+		            waitpid(pid, &status, 0);
+		        }
+		    }
 		}	
-	}	
+	}
+	return 0;
 }
