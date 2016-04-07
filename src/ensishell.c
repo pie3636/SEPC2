@@ -60,8 +60,9 @@ void terminate(char *line) {
 	/* rl_clear_history() does not exist yet in centOS 6 */
 	clear_history();
 #endif
-	if (line)
-	  free(line);
+	if (line) {
+	  	free(line);
+	}
 	printf("exit\n");
 	exit(0);
 }
@@ -116,36 +117,99 @@ int main() {
 			terminate(0);
 		}
 		
-		// Start type
+		// Start pipe
+		
+		/*
+				   //On relie les commandes//
+				   //Cas: Premiere sequence de commandes//
+				   if(i==0) {
+
+					// Redirection du fichier in sur l'entrée de la premiere commande
+					if(l->in!=NULL) {          
+					     int STDIN=open(l->in,O_RDONLY);
+					     if(STDIN==-1) {
+					     	printf("Erreur dans l'ouverture du fichier IN\n");
+					     	exit(0); //On ouvre le descripteur de fichier mode lecture
+					     }
+					     
+					     dup2(STDIN,0); // On le duplique dans le descripteur stdin//
+					     if(close(STDIN)==-1){
+						  printf("Erreur dans la fermeture du fichier\n");
+					     }
+					} 
+					 //on relie les sequences de commandes entre elles, en l'occurence ici, on dirige la sortie de la commande vers l'entrée du tuyau//			
+				     dup2(Tuyau[1],1); // on relie la sortie du processus au pipe coté ecriture//
+				     close(Tuyau[1]); //Cloture l'ecriture du pipe //
+				     close(Tuyau[0]); //Cloture la lecture du pipe//
+				   }	
+				   
+				   //Cas: Deuxieme sequence de commandes//
+				   else if( i==1) {
+					//On relie la sortie du tuyau a l'entrée de la sequence de commandes
+					dup2(Tuyau[0],0); // on relie l'entree du processus au pipe coté lecture//
+					close(Tuyau[1]); //on cloture l'ecriture du pipe//
+					close(Tuyau[0]); //on cloture la lecture du pipe //	
+				   
+
+					//On gere la redirection de sortie si elle existe//
+					if(l->out!=NULL) {
+					     int STDOUT;
+					     if ((STDOUT=open(l->out, O_RDWR | O_CREAT | O_TRUNC, S_IRWXU | S_IRWXG | S_IRWXO))==-1) {
+					     	printf("Erreur dans l'ouverture du fichier OUT");
+					        exit(0);
+					     }
+					     	
+					    //On ouvre le descripteur de fichier mode ecriture, creation et concatenation//
+					     dup2(STDOUT,1);
+					     if(close(STDOUT)==-1){
+						  printf("Erreur dans la fermeture du fichier\n");
+					     }
+
+				         }  
+				   }
+			 	   	      
+			      //On execute la commande
+			       execvp(cmd[0],cmd);
+			       perror("exec");
+			       exit(1);    
+	close(Tuyau[0]);
+	close(Tuyau[1]);
+		
+		*/
 		if (l->seq[1] != NULL) {
 			int pfd[2];
 			if (pipe(pfd) == -1) {
 				perror("Pipe failed\n");
 			} else {
-			 
 				int pid;
 			   	if ((pid = fork()) < 0) {
-					printf("fork failed\n");
+					printf("Fork failed\n");
 				} else {
 			 		if (pid == 0) { // Child
 						close(pfd[1]);
 						dup2(pfd[0], 0); // Connect the read side with stdin
 						close(pfd[0]);
-						execlp(l->seq[1][0], *(l->seq[1]), NULL);
+						execvp(l->seq[1][0], l->seq[1]);
 						perror("Command failed"); // Execlp shouldn't return
 					} else { // Parent
 						close(pfd[0]);
 						dup2(pfd[1], 1); // Connect the write side with stdout
 						close(pfd[1]);
-						execlp(l->seq[0][0], *(l->seq[0]), NULL);
-						perror("Command failed"); // Execlp shouldn't return
+						if ((pid = fork()) < 0) {
+							printf("Fork failed\n");
+						} else {
+							if (pid == 0) {
+								execvp(l->seq[0][0], l->seq[0]);
+								perror("Command failed"); // Execlp shouldn't return
+							}
+						}
 					}
 				}
 			}
 		} else {
 			if (l->err) {
 				/* Syntax error, read another command */
-				printf("error: %s\n", l->err);
+				printf("Error: %s\n", l->err);
 				continue;
 			}
 
@@ -158,7 +222,7 @@ int main() {
 				if (jobs == NULL) {
 					printf("No jobs found\n");
 				} else {
-					int count = 1;
+					int count = 1, jobs_count = 0;
 					pid_list* current = jobs, *cur;
 					while (current != NULL) {
 						if (current->isFinished) { // Suppression de la liste
@@ -176,10 +240,14 @@ int main() {
 							}
 						} else {
 							current->isFinished = waitpid(current->pid, &status, WNOHANG);
+							jobs_count++;
 							printf("[%d]\t%s\t%d\t%s\n", count, current->isFinished ? "Terminé\t\0" : "En cours\0", current->pid, current->command);
 						}
 						current = current->next;
 						count++;
+					}
+					if (jobs_count == 0) {
+						printf("No jobs found\n");
 					}
 				}
 			} else {
