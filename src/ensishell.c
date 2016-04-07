@@ -119,35 +119,32 @@ int main() {
 //start pipe
 		
 		
-		if ( l->seq[1] != NULL) {
-			
-		// pipe_verbindung[0] zum Lesen und pipe_verbindung[1] zum Schreiben
-		int pipe_connection[2];
-
-		//Initialisierung durch die Funktion Pipe
-		pipe(pipe_connection);
-
-		//Kindprozess erzeugen
-		if (fork()==0){
-        		// dup2 verbindet den Filedeskriptor der Pipe mit dem Filedeskriptor der Standardausgabe
-        		dup2(pipe_connection[1],1);
-
-        		// der Leseausgang muss geschlossen werden, da dieser Prozess nichts liest
-        		close(pipe_connection[0]);
-
-        		 // Kommando ausführen, Standardausgabe des Kommandos ist mit der Pipe verbunden
-        		 execvp(l->seq[0][0], l->seq[0]);
-        		}
-		// dann zweiten Kindprozess erzeugen
-		else if (fork()==0){
-        		dup2(pipe_connection[0],0);
-        		close(pipe_connection[1]);
-        		 execvp(l->seq[1][0], l->seq[1]);
-        		}
+		if (l->seq[1] != NULL) {
+			int pfd[2];
+			if (pipe(pfd) == -1) {
+				perror("Pipe failed\n");
+			} else {
+			 
+				int pid;
+			   	if ((pid = fork()) < 0) {
+					printf("fork failed\n");
+				} else {
+			 		if (pid == 0) { // Child
+						close(pfd[1]);
+						dup2(pfd[0], 0); // Connect the read side with stdin
+						close(pfd[0]);
+						execlp(l->seq[1][0], *(l->seq[1]), NULL);
+						perror("Command failed"); // Execlp shouldn't return
+					} else { // Parent
+						close(pfd[0]);
+						dup2(pfd[1], 1); // Connect the write side with stdout
+						close(pfd[1]);
+						execlp(l->seq[0][0], *(l->seq[0]), NULL);
+						perror("Command failed"); // Execlp shouldn't return
+					}
+				}
+			}
 		} else {
-
-			
-
 			if (l->err) {
 				/* Syntax error, read another command */
 				printf("error: %s\n", l->err);
