@@ -122,23 +122,26 @@ int main() {
 }
 
 int readAndRun(struct cmdline* l, int* returnStatus) {
-	int status;
+	int status, pfd[2], pid;
 	*returnStatus = 0;
 
 	// Start pipe
+	if (l->seq != NULL && l->seq[0] != NULL && !strcmp(l->seq[0][0], "exit")) {
+		*returnStatus = 1;
+	    return 0;
+	}
 	if (l->seq != NULL && l->seq[0] != NULL && l->seq[1] != NULL) {
-		int pfd[2], pid;
-		if (pipe(pfd) == -1 || (pid = fork()) < 0) {
-		    perror("Pipe or fork failed\n");
-		    return 1;
-		}
 		if (!strcmp(l->seq[0][0], "exit")) {
 			*returnStatus = 1;
 		    return 0;
 		}
+		if (pipe(pfd) == -1 || (pid = fork()) < 0) {
+		    perror("Pipe or fork failed\n");
+		    return 1;
+		}
 		if (pid == 0) {
 		    if(l->in != NULL) {          
-		        int inputfile=open(l->in,O_RDONLY);
+		        int inputfile=open(l->in, O_RDONLY);
 		        if(inputfile == -1) {
 		            printf("Error while opening input file\n");
 		            return 0;
@@ -150,8 +153,9 @@ int readAndRun(struct cmdline* l, int* returnStatus) {
 		    close(pfd[1]);
 		    close(pfd[0]);
 		    execvp(l->seq[0][0], l->seq[0]);
-		    perror("Error while executing command");
-		    return 1; 
+		    exit(0);
+		} else {
+			 waitpid(pid, &status, 0);
 		}
 		if (!strcmp(l->seq[1][0], "exit")) {
 		    *returnStatus = 1;
@@ -166,46 +170,23 @@ int readAndRun(struct cmdline* l, int* returnStatus) {
 		        int outputfile = open(l->out, O_CREAT | O_RDWR | O_TRUNC, S_IRUSR | S_IWUSR | S_IXUSR | S_IRGRP | S_IWGRP | S_IXGRP | S_IROTH | S_IWOTH | S_IXOTH);
 		        if (outputfile == -1) {
 		            printf("Error while opening output file\n");
-		            return 0;
+		            exit(0);
 		        }
 		        dup2(outputfile, 1);
 		        close(outputfile);
 		    }  
 		    execvp(l->seq[1][0], l->seq[1]);
-		    perror("exec");
-		    return 1;
+		    exit(0);
 		}
 		close(pfd[0]);
 		close(pfd[1]);
-		/*
-		   if (pid == 0) { // Child
-		   close(pfd[1]);
-		   dup2(pfd[0], 0); // Connect the read side with stdin
-		   close(pfd[0]);
-		   execvp(l->seq[1][0], l->seq[1]);
-		   perror("Command failed"); // Execlp shouldn't return
-		   } else { // Parent
-		   close(pfd[0]);
-		   dup2(pfd[1], 1); // Connect the write side with stdout
-		   close(pfd[1]);
-		   if ((pid = fork()) < 0) {
-		   printf("Fork failed\n");
-		   } else {
-		   if (pid == 0) {
-		   execvp(l->seq[0][0], l->seq[0]);
-		   perror("Command failed"); // Execlp shouldn't return
-		   }
-		   }
-		   }
-		   */
-	} else {
+		waitpid(pid, &status, 0);
+	} else { // Syntax error, read another command
 		if (l->err) {
-		    /* Syntax error, read another command */
 		    printf("Error: %s\n", l->err);
 		    return 0;
 		}
-
-		if (l->seq[0] != NULL && !strncmp(l->seq[0][0], "jobs", 4)) {
+		if (l->seq != NULL && l->seq[0] != NULL && !strncmp(l->seq[0][0], "jobs", 4)) {
 		    if (jobs == NULL) {
 		        printf("No jobs found\n");
 		    } else {
@@ -237,17 +218,25 @@ int readAndRun(struct cmdline* l, int* returnStatus) {
 		            printf("No jobs found\n");
 		        }
 		    }
-		} else {
+		} else if (l->seq != NULL && l->seq[0] != NULL) {
 		    pid_t pid = fork();
-		    if (pid == -1) {
+		    if (pid < 0) {
 		        printf("Couldn't fork!\n");
 		        return 1;
 		    } else if (pid == 0) { // Fils
-		        int ret = execvp(l->seq[0][0], l->seq[0]);
-		        if (ret != 0) {
-		            printf("An error occurred while executing command\n");
-		            return 1;
-		        }
+				if (l->in) {
+					int fd0 = open(l->in, O_RDONLY);
+					dup2(fd0, STDIN_FILENO);
+					close(fd0);
+				}
+				if (l->out) {
+					int fd1 = open(l->out, O_CREAT | O_RDWR | O_TRUNC, S_IRUSR | S_IWUSR | S_IXUSR | S_IRGRP | S_IWGRP | S_IXGRP | S_IROTH | S_IWOTH | S_IXOTH);
+					dup2(fd1, STDOUT_FILENO);
+					close(fd1);
+				}
+				execvp(l->seq[0][0], l->seq[0]);
+				perror("Failed to execute command\n");
+				exit(1);
 		    } else { // Père
 		        if (l->bg) {
 		            printf("Detaching after fork from child process %d.\n", pid);
