@@ -142,7 +142,7 @@ int main() {
 		else if (fork()==0){
         		dup2(pipe_connection[0],0);
         		close(pipe_connection[1]);
-        		 execvp(inputCommand->seq[1][0], inputCommand->seq[1]);
+        		execvp(inputCommand->seq[1][0], inputCommand->seq[1]);
         		}
 		}
 
