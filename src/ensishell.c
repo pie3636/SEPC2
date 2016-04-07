@@ -42,8 +42,8 @@ typedef struct pid_list {
 
 pid_list* jobs = NULL;
 
-int readAndRun(struct cmdline* l, int* status);
-void sig_handler(int signo);
+int readAndRun(struct cmdline* l, int* status); // Reads and executes a command
+void sig_handler(int signo); // Handles the SIGCHLD signals
 int executer(char *line);
 SCM executer_wrapper(SCM x);
 void terminate(char *line);
@@ -54,11 +54,11 @@ void sig_handler(int signo) {
 		pid_t pid;
 		int status;
 		long int timeDifference;
-		while ((pid = waitpid(-1, &status, WNOHANG)) > 0) {
+		while ((pid = waitpid(-1, &status, WNOHANG)) > 0) { // Look for any terminated processes
 			gettimeofday(&stop, NULL);
 			int count = 1;
 		    pid_list* current = jobs, *cur;
-		    while (current != NULL && current->pid != pid) {
+		    while (current != NULL && current->pid != pid) { // Find them in the list
 		    	current = current->next;
 		    	count++;
 	    	}
@@ -66,11 +66,11 @@ void sig_handler(int signo) {
 				timeDifference = stop.tv_sec * 1000000 + stop.tv_usec - current->start.tv_usec - current->start.tv_sec * 1000000; // Time difference in microseconds
 		    	printf("\n[%d]\t%d\t%s\tTerminé - durée %ld.%06ld s\nensishell>", count, pid, current->command, timeDifference / 1000000, timeDifference % 1000000);
 		    	fflush(stdout);
-		        if (jobs == current) {
+		        if (jobs == current) { // Remove the from the list (head)
 		            cur = jobs->next;
 		            free(jobs);
 		            jobs = cur;
-		        } else {
+		        } else { // Continued (tail)
 		            cur = jobs;
 		            while (cur->next != current) {
 		                cur = cur->next;
@@ -110,7 +110,7 @@ void terminate(char *line) {
 int main() {
     printf("Variante %d: %s\n", VARIANTE, VARIANTE_STRING);
     
-    signal(SIGCHLD, sig_handler);
+    signal(SIGCHLD, sig_handler); // Catches all SIGCHLD signals
 
 #ifdef USE_GUILE
     scm_init_guile();
@@ -162,18 +162,17 @@ int main() {
         if (returnStatus) {
         	exit(returnStatus);
         }
-        if (status) {
+        if (status) { // For direct calls to "exit"
         	exit(0);
         }
     }	
 }
 
 int readAndRun(struct cmdline* l, int* returnStatus) {
-	int status, pfd[2], pid;
+	int status, pfd[2], pid; // pfd contains the pipe connections.
 	*returnStatus = 0;
 
-	// Start pipe
-	if (l->seq != NULL && l->seq[0] != NULL && !strcmp(l->seq[0][0], "exit")) {
+	if (l->seq != NULL && l->seq[0] != NULL && !strcmp(l->seq[0][0], "exit")) { // First command = exit
 		*returnStatus = 1;
 	    return 0;
 	}
@@ -186,9 +185,9 @@ int readAndRun(struct cmdline* l, int* returnStatus) {
 		    perror("Pipe or fork failed\n");
 		    return 1;
 		}
-		if (pid == 0) {
-		    if(l->in != NULL) {          
-		        int inputfile=open(l->in, O_RDONLY);
+		if (pid == 0) { // Child
+		    if(l->in != NULL) {         
+		        int inputfile=open(l->in, O_RDONLY); // Opens the input file
 		        if(inputfile == -1) {
 		            printf("Error while opening input file\n");
 		            return 0;
@@ -199,7 +198,7 @@ int readAndRun(struct cmdline* l, int* returnStatus) {
 		    dup2(pfd[1], 1);
 		    close(pfd[1]);
 		    close(pfd[0]);
-		    execvp(l->seq[0][0], l->seq[0]);
+		    execvp(l->seq[0][0], l->seq[0]); // Executes the child and leaves
 		    exit(0);
 		} else {
 			fflush(stdout);
@@ -213,7 +212,7 @@ int readAndRun(struct cmdline* l, int* returnStatus) {
 		    dup2(pfd[0],0);
 		    close(pfd[1]);
 		    close(pfd[0]);
-		    if(l->out != NULL) {
+		    if(l->out != NULL) { // Opens the output file
 		        int outputfile = open(l->out, O_CREAT | O_RDWR | O_TRUNC, S_IRUSR | S_IWUSR | S_IXUSR | S_IRGRP | S_IWGRP | S_IXGRP | S_IROTH | S_IWOTH | S_IXOTH);
 		        if (outputfile == -1) {
 		            printf("Error while opening output file\n");
@@ -228,7 +227,7 @@ int readAndRun(struct cmdline* l, int* returnStatus) {
 		close(pfd[0]);
 		close(pfd[1]);
 		if (!l->bg) {
-			waitpid(pid, &status, 0);
+			waitpid(pid, &status, 0); // Wait for the children to be finished
 		}
 	} else { // Syntax error, read another command
 		if (l->err) {
@@ -242,12 +241,12 @@ int readAndRun(struct cmdline* l, int* returnStatus) {
 		        int count = 1, jobs_count = 0;
 		        pid_list* current = jobs, *cur;
 		        while (current != NULL) {
-		            if (current->isFinished) { // Suppression de la liste
-		                if (jobs == current) {
+		            if (current->isFinished) { // Removes current from the list
+		                if (jobs == current) { // Head of list
 		                    cur = jobs->next;
 		                    free(jobs);
 		                    jobs = cur;
-		                } else {
+		                } else { // Tail
 		                    cur = jobs;
 		                    while (cur->next != current) {
 		                        cur = cur->next;
@@ -255,7 +254,7 @@ int readAndRun(struct cmdline* l, int* returnStatus) {
 		                    cur->next = cur->next->next;
 		                    free(current);
 		                }
-		            } else {
+		            } else { // Process isn't done, or hasn't been viewed
 		                current->isFinished = waitpid(current->pid, &status, WNOHANG);
 		                jobs_count++;
 		                printf("[%d]\t%s\t%d\t%s\n", count, current->isFinished ? "Terminé\t\0" : "En cours\0", current->pid, current->command);
@@ -272,13 +271,13 @@ int readAndRun(struct cmdline* l, int* returnStatus) {
 			limits.rlim_cur = atoi(l->seq[0][1]);
 			limits.rlim_max = limits.rlim_cur + 5;
 			setrlimit(RLIMIT_CPU, &limits);
-		} else if (l->seq != NULL && l->seq[0] != NULL) {
+		} else if (l->seq != NULL && l->seq[0] != NULL) { // Pipes
 		    pid_t pid = fork();
 		    struct timeval time;
 		    if (pid < 0) {
 		        printf("Couldn't fork!\n");
 		        return 1;
-		    } else if (pid == 0) { // Fils
+		    } else if (pid == 0) { // Child
 				if (l->in) {
 					int fd0 = open(l->in, O_RDONLY);
 					dup2(fd0, STDIN_FILENO);
@@ -292,11 +291,11 @@ int readAndRun(struct cmdline* l, int* returnStatus) {
 				execvp(l->seq[0][0], l->seq[0]);
 				perror("Failed to execute command\n");
 				exit(1);
-		    } else { // Père
-		    	gettimeofday(&time, NULL);
+		    } else { // Parent
+		    	gettimeofday(&time, NULL); // Executed as soon as possible to be more accurate
 		        if (l->bg) {
 			        printf("Detaching after fork from child process %d.\n", pid);
-		            pid_list* new_job = malloc(sizeof(pid_list));
+		            pid_list* new_job = malloc(sizeof(pid_list)); // Setting a new job in the list
 		            new_job->pid = pid;
 		            new_job->command = malloc(sizeof(char) * strlen(l->seq[0][0])); // TODO: Copy entire command?
 		            new_job->isFinished = 0;
@@ -309,7 +308,7 @@ int readAndRun(struct cmdline* l, int* returnStatus) {
 		                free(new_job);
 		            }
 		        } else {
-		            waitpid(pid, &status, 0);
+		            waitpid(pid, &status, 0); // Only actually wait if this isn't a background task
 		        }
 		    }
 		}	
